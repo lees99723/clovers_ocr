@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="ocr.main.service.impl.MainMapper">
+
+	<resultMap id="mainVO" type="ocr.main.service.MainVO">
+		<result property="ocr_col1" column="ocr_col1"/>
+		<result property="ocr_col2" column="ocr_col2"/>
+	</resultMap>
+
+	<select id="selectMainList" parameterType="searchVO" resultType="egovMap">
+			SELECT OCR_COL1, OCR_COL2
+			FROM OCR_TEST
+	</select>
+
+</mapper>

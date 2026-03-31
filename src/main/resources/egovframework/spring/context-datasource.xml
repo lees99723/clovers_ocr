@@ -8,7 +8,14 @@
 	<jdbc:embedded-database id="dataSource" type="HSQL">
 		<jdbc:script location= "classpath:/db/sampledb.sql"/>
 	</jdbc:embedded-database>
-     
+	
+	<!-- postgresql -->
+    <bean id="dataSource_ocr" class="org.apache.commons.dbcp.BasicDataSource" destroy-method="close">
+    	<property name="driverClassName" value="org.postgresql.Driver" />
+    	<property name="url" value="jdbc:postgresql://192.168.50.32:5432/ocr_db" />
+    	<property name="username" value="ocr_user" />
+    	<property name="password" value="1234" />
+    </bean>
      
     <!-- hsql (테스트용 메모리 DB)
     <bean id="dataSource" class="org.apache.commons.dbcp2.BasicDataSource" destroy-method="close">
