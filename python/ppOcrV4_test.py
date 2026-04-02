@@ -1,7 +1,7 @@
 #  <이미지 파일 하나 받아서 ocr기능 들어간 pdf 생성>
 # PP-OCRv4 (2.8.1 안정 버전) 사용 및 스마트 크기 맞춤 적용
 # 이미지 크기 조정
-# 언어팩 하나만 가능
+# 사용자정의 언어 txt 파일 로드
 
 #
 # 1. 필수 설치 라이브러리 :
@@ -26,49 +26,53 @@
 
 import os
 import fitz  # PyMuPDF
+import cv2   # 이미지 확대를 위해 필요
+import numpy as np
+from paddleocr import PaddleOCR
+from PIL import Image
+
 # 엔진 오류 방지
 os.environ['FLAGS_use_onednn'] = '0'
 os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
 
-from paddleocr import PaddleOCR
-from PIL import Image
-
 def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
-    # 1. OCR 초기화 (기존 동일)
     print("⏳ 엔진 초기화 중...")
+    
+    # [설정] 인식률 향상을 위한 확대 배율 (2.0배 확대)
+    upscale_factor = 2.0 
+    
     ocr = PaddleOCR(
         lang='korean',
         ocr_version='PP-OCRv4',
         use_angle_cls=True,
         show_log=False,
+        # 이미지가 커지므로 디텍션 제한도 함께 늘려줍니다.
+        det_limit_side_len=4000 
     )
     
-    # 2. 이미지 정보 및 스마트 배율 계산
-    img = Image.open(image_path)
-    img_w, img_h = img.size # 예: 1476, 2409
+    # 1. 이미지 로드 및 PDF 기본 크기 계산
+    img_pil = Image.open(image_path)
+    img_w, img_h = img_pil.size
     
-    max_h = 650.0 # 세로 높이 제한
-    max_w = 450.0 # 가로 너비 제한
-
-    # 가로/세로 중 비율을 더 많이 줄여야 하는 쪽을 선택
+    max_h, max_w = 650.0, 450.0
     scaling_factor = min(max_w / img_w, max_h / img_h)
-    
-    # 최종 PDF 종이 크기 결정
-    pdf_w = img_w * scaling_factor
-    pdf_h = img_h * scaling_factor
+    pdf_w, pdf_h = img_w * scaling_factor, img_h * scaling_factor
 
-    # PyMuPDF로 PDF 생성 시작
     doc = fitz.open()
-    # 계산된 크기로 페이지 생성
     page = doc.new_page(width=pdf_w, height=pdf_h) 
-    # 이미지를 작아진 페이지 크기에 맞게 삽입
     page.insert_image(page.rect, filename=image_path)
     
-
+    # 2. [핵심] OCR용 이미지 확대 (OpenCV 사용)
+    # 한글 경로 문제를 방지하기 위해 numpy로 읽습니다.
+    img_array = np.fromfile(image_path, np.uint8)
+    img_cv = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
     
-    # 3. OCR 수행 (원본 이미지로 수행)
-    print(f"🚀 분석 시작: {image_path}")
-    results = ocr.ocr(image_path, cls=True)
+    print(f"🔍 인식 정밀도 향상을 위해 이미지를 {upscale_factor}배 확대 중...")
+    img_upscaled = cv2.resize(img_cv, None, fx=upscale_factor, fy=upscale_factor, interpolation=cv2.INTER_CUBIC)
+    
+    # 3. 확대된 이미지로 OCR 수행
+    print(f"🚀 분석 시작 (확대 인식 모드): {image_path}")
+    results = ocr.ocr(img_upscaled, cls=True)
     
     if not results or results[0] is None:
         print("❌ 인식된 데이터가 없습니다.")
@@ -78,52 +82,54 @@ def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
     font_path = "C:/Windows/Fonts/malgun.ttf"
     data_list = results[0]
     print(f"📝 총 {len(data_list)}개의 문장을 PDF에 심는 중...")
-    print(results)
     
     for line in data_list:
         try:
-            box = line[0]          # 좌표 (4개의 점, 원본 이미지 기준 pixel 단위)
-            text = line[1][0]      # 인식된 글자
-            #print(f"{text:<25}")
-            if not text.strip(): continue
-                
-            # [🔥 핵심 수정 포인트] 원본 거대 좌표에 scaling_factor를 곱해서 
-            # 작아진 PDF 종이 좌표(pt 단위)로 재계산합니다.
-            x_coords = [p[0] * scaling_factor for p in box]
-            y_coords = [p[1] * scaling_factor for p in box]
+            # 확대된 이미지 기준의 뻥튀기된 좌표
+            upscaled_box = line[0] 
+            text = line[1][0]
             
-            # 작아진 좌표로 Rect 생성
+            if not text.strip(): continue
+            
+            # [🔥 좌표 역계산 핵심]
+            # 1. upscaled_box 좌표를 다시 원본 크기로 복구 (upscale_factor로 나눔)
+            # 2. 원본 크기 좌표에 최종 PDF scaling_factor를 곱함
+            x_coords = [(p[0] / upscale_factor) * scaling_factor for p in upscaled_box]
+            y_coords = [(p[1] / upscale_factor) * scaling_factor for p in upscaled_box]
+            
+            # 복구된 좌표로 Rect 생성
             rect = fitz.Rect(min(x_coords), min(y_coords), max(x_coords), max(y_coords))
             
-            # 텍스트 삽입 (render_mode=3으로 투명하게)
+            # 텍스트 삽입 (위치 및 폰트 크기는 원래 박스 크기에 맞춰짐)
+            # 괄호 에러 방지를 위해 위치를 튜플로 명시
+            text_pos = (rect.x0, rect.y1 - (rect.height * 0.1))
+            
             page.insert_text(
-                (rect.x0, rect.y1 - (rect.height * 0.1)), # 위치 미세 보정
+                text_pos,
                 text, 
-                # fontsize도 작아진 rect 높이에 맞춥니다.
-                fontsize=rect.height * 0.85, 
+                fontsize=rect.height * 0.85, # 박스 높이에 맞춘 폰트 크기
                 fontfile=font_path,
-                fontname="ko",     
-                render_mode=3      
+                fontname="ko",
+                render_mode=3 
             )
             
         except Exception as e:
-            # print(f"⚠️ 개별 문장 오류 발생: {e}")
             continue
 
-    # 6. 저장 및 출력 디렉토리 확인
+    # 4. 저장
     output_dir = os.path.dirname(output_pdf_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
     doc.save(output_pdf_path)
     doc.close()
-    print(f"\n🏁 OCR PDF 생성완료: {output_pdf_path}")
+    print(f"\n🏁 확대 인식 PDF 생성완료: {output_pdf_path}")
 
 
 if __name__ == "__main__":
     base_dir = r"C:\OCR_test\ocr_test1"
-    image_file = os.path.join(base_dir, "00000004.jpg")
-    output_pdf = os.path.join(base_dir, "output", "00000004.pdf")
+    image_file = os.path.join(base_dir, "00000006.jpg")
+    output_pdf = os.path.join(base_dir, "output", "00000006.pdf")
     
     if os.path.exists(image_file):
         create_searchable_pdf_with_fitz(image_file, output_pdf)

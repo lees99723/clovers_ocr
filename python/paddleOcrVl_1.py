@@ -4,9 +4,14 @@ from paddleocr import PaddleOCRVL
 
 os.environ['FLAGS_use_onednn'] = '0'
 
-pipeline = PaddleOCRVL(device="gpu", use_layout_detection=False)
+pipeline = PaddleOCRVL(
+    device="gpu", 
+    use_layout_detection=True,
+    use_doc_orientation_classify=True, 
+    use_doc_unwarping=True 
+    )
 
-output = pipeline.predict("C:/OCR_test/ocr_test1/00000222.jpg")
+output = pipeline.predict("C:/OCR_test/ocr_test1/00000006.jpg")
 
 # 3. 결과 출력 및 저장 (주신 코드 로직 그대로)
 for res in output:

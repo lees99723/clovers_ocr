@@ -1,127 +1,103 @@
+# 글 삽입까지, 
+# predict 함수 -> 좌표가 부정확
+# PyMuPDF는 글자의 밑줄을 기준으로 잡음/predict는 텍스트 박스 높이의 75%지점을 기준으로 잡음 -> 실제이미지와 텍스트의 위치가 어긋남
+
 import os
 import fitz  # PyMuPDF
-# 엔진 오류 방지
-os.environ['FLAGS_use_onednn'] = '0'
-os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
-
 from paddleocr import PaddleOCRVL
 from PIL import Image
 
 def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
-    # 1. OCR 초기화 (기존 동일)
-    print("⏳ 엔진 초기화 중...")
-    ocr = PaddleOCRVL(device="gpu", use_layout_detection=False)
+    print("⏳ 엔진 초기화 및 이미지 분석 중...")
+    ocr = PaddleOCRVL(
+        device="gpu", 
+        use_layout_detection=True,
+        use_doc_orientation_classify=False, # True 했을 때 앵글이 180도 돌아가버림
+        use_doc_unwarping=True,
+        use_ocr_for_image_block=False 
+    )
     
-    # 2. 이미지 정보 및 스마트 배율 계산
     img = Image.open(image_path)
-    img_w, img_h = img.size # 예: 1476, 2409
+    img_w, img_h = img.size
     
-    max_h = 650.0 # 세로 높이 제한
-    max_w = 450.0 # 가로 너비 제한
-
-    # 가로/세로 중 비율을 더 많이 줄여야 하는 쪽을 선택
+    # PDF 스케일 계산
+    max_h, max_w = 650.0, 450.0
     scaling_factor = min(max_w / img_w, max_h / img_h)
-    
-    # 최종 PDF 종이 크기 결정
-    pdf_w = img_w * scaling_factor
-    pdf_h = img_h * scaling_factor
+    pdf_w, pdf_h = img_w * scaling_factor, img_h * scaling_factor
 
-    # PyMuPDF로 PDF 생성 시작
     doc = fitz.open()
-    # 계산된 크기로 페이지 생성
     page = doc.new_page(width=pdf_w, height=pdf_h) 
-    # 이미지를 작아진 페이지 크기에 맞게 삽입
     page.insert_image(page.rect, filename=image_path)
     
-
-    
-    # 3. OCR 수행 (결과값은 dict 형태임)
-    results = ocr.predict(image_path, format_block_content=True) 
     font_path = "C:/Windows/Fonts/malgun.ttf"
-    # PaddleOCRVL의 결과는 보통 리스트 안에 딕셔너리가 들어있는 구조입니다.
-    # 위에서 보여주신 구조에 따라 parsing_res_list를 타겟팅합니다.
-    data_list = results[0].get('parsing_res_list', [])
+    if not os.path.exists(font_path):
+        # 맑은 고딕이 없을 경우 대비 (윈도우 기본 폰트 경로)
+        font_path = "C:/Windows/Fonts/batang.ttc" 
+        
+    page.insert_font(fontname="ko", fontfile=font_path)
 
-    print(data_list)
+    # OCR 수행
+    results = ocr.predict(image_path, format_block_content=False) 
+    
+    layout_boxes = results[0]['layout_det_res']['boxes']
+    parsing_res = results[0]['parsing_res_list']
+    
+    print(f"🔎 총 {len(layout_boxes)}개의 블록을 매칭합니다.")
+    print(results[0])
 
-    for item in data_list:
-        try:
-            
-            box = item.bbox      # [xmin, ymin, xmax, ymax] 형태
-            text = item.content  # 인식된 글자
-            print(box)
-            print(text)
-            
-            #if not text.strip(): continue
+    # 좌표와 텍스트 매칭 루프
+    for i, (box, p_item) in enumerate(zip(layout_boxes, parsing_res)):
+        coords = box['coordinate']
+        x1, y1, x2, y2 = [c * scaling_factor for c in coords]
+        box_h = y2 - y1
+        
+        # 텍스트 추출 (딕셔너리/객체 모두 대응)
+        if isinstance(p_item, dict):
+            content = p_item.get('block_content') or p_item.get('content', '')
+        else:
+            content = getattr(p_item, 'block_content', '') or getattr(p_item, 'content', '')
 
-            x1, y1, x2, y2 = [coord * scaling_factor for coord in box]
-            
-            # 2. PyMuPDF Rect 생성
-            rect = fitz.Rect(x1, y1, x2, y2)
-
-            font_size = (y2 - y1) * 0.85
-            if font_size <= 0: font_size = 10 
-
-            page.insert_text(
-                (rect.x0, rect.y1 - (rect.height * 0.1)), 
-                text,
-                fontsize=font_size,
-                fontfile=font_path,
-                fontname="ko",
-                render_mode=3 # 투명(검색만 가능)
-            )
-            
-        except Exception as e:
-            print(f"⚠️ 개별 문장 오류 발생: {e}")
+        if not content or not content.strip():
             continue
-    
-    # data_list = results[0]
-    # print(f"📝 총 {len(data_list)}개의 문장을 PDF에 심는 중...")
-    
-    # for line in data_list:
-    #     try:
-    #         box = line[0]          # 좌표 (4개의 점, 원본 이미지 기준 pixel 단위)
-    #         text = line[1][0]      # 인식된 글자
-    #         print(f"{text:<25}")
-    #         if not text.strip(): continue
-                
-    #         # [🔥 핵심 수정 포인트] 원본 거대 좌표에 scaling_factor를 곱해서 
-    #         # 작아진 PDF 종이 좌표(pt 단위)로 재계산합니다.
-    #         x_coords = [p[0] * scaling_factor for p in box]
-    #         y_coords = [p[1] * scaling_factor for p in box]
-            
-    #         # 작아진 좌표로 Rect 생성
-    #         rect = fitz.Rect(min(x_coords), min(y_coords), max(x_coords), max(y_coords))
-            
-    #         # 텍스트 삽입 (render_mode=3으로 투명하게)
-    #         page.insert_text(
-    #             (rect.x0, rect.y1 - (rect.height * 0.1)), # 위치 미세 보정
-    #             text, 
-    #             # fontsize도 작아진 rect 높이에 맞춥니다.
-    #             fontsize=rect.height * 0.85, 
-    #             fontfile=font_path,
-    #             fontname="ko",     
-    #             render_mode=3      
-    #         )
-            
-    #     except Exception as e:
-    #         # print(f"⚠️ 개별 문장 오류 발생: {e}")
-    #         continue
 
-    # 6. 저장 및 출력 디렉토리 확인
+        lines = content.split('\n')
+        line_count = len(lines)
+        line_height = box_h / line_count if line_count > 0 else box_h
+        
+        for idx, line in enumerate(lines):
+            line = line.strip()
+            if not line: continue
+            
+            # y 좌표 계산
+            current_y = y1 + (idx * line_height) + (line_height * 0.75)
+            
+            # 폰트 크기 결정
+            f_size = max(6, min(line_height * 0.8, 11))
+            
+            try:
+                page.insert_text(
+                    (x1, current_y), 
+                    line, 
+                    fontsize=f_size, 
+                    fontname="ko",  # 위에서 등록한 'ko' 사용
+                    render_mode=0    # 우선 글자가 보이나 확인 (확인 후 3으로 변경)
+                )
+            except Exception as e:
+                print(f"❌ [블록{i}-줄{idx}] 삽입 실패: {e}")
+
+    # 저장
     output_dir = os.path.dirname(output_pdf_path)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
         
     doc.save(output_pdf_path)
     doc.close()
-    print(f"\n🏁 OCR PDF 생성완료: {output_pdf_path}")
-
+    print(f"\n🏁 생성 완료: {output_pdf_path}")
 
 if __name__ == "__main__":
     base_dir = r"C:\OCR_test\ocr_test1"
     image_file = os.path.join(base_dir, "00000006.jpg")
-    output_pdf = os.path.join(base_dir, "output", "1.pdf")
+    output_pdf = os.path.join(base_dir, "output", "00000006반전.pdf")
     
     if os.path.exists(image_file):
         create_searchable_pdf_with_fitz(image_file, output_pdf)

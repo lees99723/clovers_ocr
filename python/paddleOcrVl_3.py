@@ -1,4 +1,4 @@
-# 좌표계 정확 다만, 문단이 길어지면 한 박스로 읽어들이는 문제
+# 좌표계는 맞는다먄, 문단이 길어지면 한 박스로 읽어들이는 문제
 
 
 import os
@@ -48,7 +48,6 @@ def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
     parsing_res = results[0]['parsing_res_list']
     print(f"🔎 총 {len(parsing_res)}개의 텍스트 라인을 삽입합니다.")
     print(results)
-    parsing_res.save_to_json(save_path="C:/OCR_test/ocr_test1/output")
 
     # 5. 데이터 순회 및 텍스트 레이어 삽입
     for i, item in enumerate(parsing_res):
@@ -67,11 +66,8 @@ def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
             # 변환된 박스의 높이 계산
             box_h = pdf_y2 - pdf_y1
             
-            lines = content.split('\n')
-            line_count = len(lines)
-            
             # 폰트 크기: 박스 높이의 90% 수준
-            f_size = (box_h / line_count) * 0.8
+            f_size = box_h * 0.9
             
             # y축(Baseline) 보정: 
             # PyMuPDF의 insert_text는 글자 바닥 기준입니다.
@@ -103,8 +99,8 @@ def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
 if __name__ == "__main__":
     # 경로 설정 (사용자 환경에 맞게 수정)
     base_dir = r"C:\OCR_test\ocr_test1"
-    image_file = os.path.join(base_dir, "00000004.jpg")
-    output_pdf = os.path.join(base_dir, "output", "00000004.pdf")
+    image_file = os.path.join(base_dir, "00000006.jpg")
+    output_pdf = os.path.join(base_dir, "output", "00000006_최종보정본.pdf")
     
     if os.path.exists(image_file):
         create_searchable_pdf_with_fitz(image_file, output_pdf)

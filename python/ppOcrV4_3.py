@@ -1,7 +1,12 @@
 #  <이미지 파일 하나 받아서 ocr기능 들어간 pdf 생성>
 # PP-OCRv4 (2.8.1 안정 버전) 사용 및 스마트 크기 맞춤 적용
 # 이미지 크기 조정
-# 언어팩 하나만 가능
+
+# <언어팩 문제>
+# 사용자정의 언어 txt 파일 로드(한글,한자,영어 포함했으나 모델의 인식률이 낮음)
+# 1. ocr클래스를 로드할때 처음 불러온 언어모델이 먼저 문자판단 -> 인덱스를 던져
+# 2. 사전에서는 해당 문자의 인덱스를 통해 문자를 불러오기 때문에 결국 똑같음
+# 만약 ocr클래스 객체를 언어마다 만든다고 해도 '노신사老仲主'같은 경우가 한 텍스트로 잡혀서 인식하면 결국 한 언어만 선택해야함
 
 #
 # 1. 필수 설치 라이브러리 :
@@ -36,8 +41,13 @@ from PIL import Image
 def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
     # 1. OCR 초기화 (기존 동일)
     print("⏳ 엔진 초기화 중...")
+    
+    dict_path = "C:/eGovFrameDev-4.3.1-64bit/workspace-egov/ocr/python/dict/ppocrv4_doc_dict.txt"
+    
     ocr = PaddleOCR(
-        lang='korean',
+        lang='korean', # 반드시 내부적으로 특정 lang에 매칭되는 파일을 로드해야만 작동
+        rec_char_dict_path=dict_path, # 전체 글자목록이 담겼지만 결국 내부적으로 인식한 언어 한정해서 읽어올수 일뿐
+        det_db_unclip_ratio=1.6,
         ocr_version='PP-OCRv4',
         use_angle_cls=True,
         show_log=False,
@@ -122,8 +132,8 @@ def create_searchable_pdf_with_fitz(image_path, output_pdf_path):
 
 if __name__ == "__main__":
     base_dir = r"C:\OCR_test\ocr_test1"
-    image_file = os.path.join(base_dir, "00000004.jpg")
-    output_pdf = os.path.join(base_dir, "output", "00000004.pdf")
+    image_file = os.path.join(base_dir, "00000222.jpg")
+    output_pdf = os.path.join(base_dir, "output", "00000222.pdf")
     
     if os.path.exists(image_file):
         create_searchable_pdf_with_fitz(image_file, output_pdf)
